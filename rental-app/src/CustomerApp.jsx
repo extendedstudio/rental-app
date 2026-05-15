@@ -1,6 +1,6 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { db } from "./firebase";
-import { collection, onSnapshot, addDoc, getDocs } from "firebase/firestore";
+import { collection, onSnapshot, addDoc } from "firebase/firestore";
 
 const iS = { width:"100%",boxSizing:"border-box",background:"#f9f9f7",border:"1px solid #e5e3dd",borderRadius:8,padding:"10px 12px",fontSize:13,color:"#1a1a1a",outline:"none",fontFamily:"'Noto Sans KR',sans-serif" };
 const TODAY = new Date().toISOString().slice(0,10);
@@ -19,6 +19,144 @@ const EQ_FALLBACK = [
   {id:"e8",name:"Radial J48 DI박스",cat:"기타",qty:8,rate:10000},
 ];
 
+// ─── AI 챗봇 컴포넌트 ───────────────────────────────────────────
+function AIChatBot({ eq }) {
+  const [open, setOpen] = useState(false);
+  const [messages, setMessages] = useState([
+    { role: "assistant", content: "안녕하세요! Extended Studio AI 상담사입니다 🎛️\n행사 규모나 필요한 장비를 말씀해 주시면 맞춤 추천해 드릴게요!" }
+  ]);
+  const [input, setInput] = useState("");
+  const [loading, setLoading] = useState(false);
+  const bottomRef = useRef(null);
+
+  useEffect(() => {
+    if (open) bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages, open]);
+
+  const send = async () => {
+    const text = input.trim();
+    if (!text || loading) return;
+    const newMessages = [...messages, { role: "user", content: text }];
+    setMessages(newMessages);
+    setInput("");
+    setLoading(true);
+
+    try {
+      const res = await fetch("/api/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          messages: newMessages.map(m => ({ role: m.role, content: m.content })),
+          equipmentList: eq.map(e => ({ name: e.name, cat: e.cat, rate: e.rate })),
+        }),
+      });
+      const data = await res.json();
+      const reply = data?.content?.[0]?.text || "잠시 후 다시 시도해 주세요.";
+      setMessages(prev => [...prev, { role: "assistant", content: reply }]);
+    } catch {
+      setMessages(prev => [...prev, { role: "assistant", content: "연결 오류가 발생했습니다. 카카오톡으로 문의해 주세요 🙏" }]);
+    }
+    setLoading(false);
+  };
+
+  return (
+    <>
+      {/* 플로팅 버튼 */}
+      <button
+        onClick={() => setOpen(!open)}
+        style={{
+          position:"fixed", bottom:24, right:20, zIndex:1000,
+          width:56, height:56, borderRadius:50, border:"none",
+          background: open ? "#333" : "#f59e0b",
+          color:"#fff", fontSize:24, cursor:"pointer",
+          boxShadow:"0 4px 20px rgba(0,0,0,.25)",
+          display:"flex", alignItems:"center", justifyContent:"center",
+          transition:"background .2s"
+        }}
+      >
+        {open ? "✕" : "🤖"}
+      </button>
+
+      {/* 채팅창 */}
+      {open && (
+        <div style={{
+          position:"fixed", bottom:90, right:20, zIndex:999,
+          width:"min(340px, calc(100vw - 40px))",
+          background:"#fff", borderRadius:20,
+          boxShadow:"0 8px 40px rgba(0,0,0,.18)",
+          display:"flex", flexDirection:"column",
+          overflow:"hidden", fontFamily:"'Noto Sans KR',sans-serif"
+        }}>
+          {/* 헤더 */}
+          <div style={{background:"#111", padding:"14px 16px", display:"flex", alignItems:"center", gap:10}}>
+            <div style={{width:36, height:36, borderRadius:50, background:"#f59e0b", display:"flex", alignItems:"center", justifyContent:"center", fontSize:18}}>🤖</div>
+            <div>
+              <div style={{color:"#fff", fontSize:13, fontWeight:700}}>AI 장비 상담</div>
+              <div style={{color:"#888", fontSize:11}}>Extended Studio · 실시간 응답</div>
+            </div>
+          </div>
+
+          {/* 메시지 영역 */}
+          <div style={{flex:1, overflowY:"auto", padding:12, display:"flex", flexDirection:"column", gap:10, maxHeight:320, minHeight:200}}>
+            {messages.map((m, i) => (
+              <div key={i} style={{display:"flex", justifyContent: m.role === "user" ? "flex-end" : "flex-start"}}>
+                <div style={{
+                  maxWidth:"80%", padding:"10px 12px", borderRadius: m.role === "user" ? "16px 16px 4px 16px" : "16px 16px 16px 4px",
+                  background: m.role === "user" ? "#f59e0b" : "#f5f4f0",
+                  color: m.role === "user" ? "#000" : "#1a1a1a",
+                  fontSize:13, lineHeight:1.6, whiteSpace:"pre-wrap"
+                }}>
+                  {m.content}
+                </div>
+              </div>
+            ))}
+            {loading && (
+              <div style={{display:"flex", justifyContent:"flex-start"}}>
+                <div style={{background:"#f5f4f0", borderRadius:"16px 16px 16px 4px", padding:"10px 14px", fontSize:13, color:"#888"}}>
+                  답변 작성 중...
+                </div>
+              </div>
+            )}
+            <div ref={bottomRef} />
+          </div>
+
+          {/* 빠른 질문 */}
+          <div style={{padding:"0 12px 8px", display:"flex", gap:6, overflowX:"auto"}}>
+            {["100명 행사 추천", "야외 행사 장비", "예산 50만원"].map(q => (
+              <button key={q} onClick={() => { setInput(q); }} style={{
+                border:"1px solid #e5e3dd", borderRadius:20, padding:"5px 12px",
+                fontSize:11, whiteSpace:"nowrap", cursor:"pointer",
+                background:"#fff", color:"#6b7280", flexShrink:0
+              }}>{q}</button>
+            ))}
+          </div>
+
+          {/* 입력창 */}
+          <div style={{padding:"8px 12px 12px", display:"flex", gap:8, borderTop:"1px solid #f0efeb"}}>
+            <input
+              value={input}
+              onChange={e => setInput(e.target.value)}
+              onKeyDown={e => e.key === "Enter" && send()}
+              placeholder="장비 문의 또는 행사 정보를 입력하세요"
+              style={{...iS, flex:1, fontSize:12, padding:"8px 12px"}}
+            />
+            <button
+              onClick={send}
+              disabled={loading}
+              style={{
+                border:"none", background: loading ? "#ccc" : "#f59e0b",
+                borderRadius:10, padding:"8px 14px",
+                fontSize:13, fontWeight:700, cursor: loading ? "not-allowed" : "pointer"
+              }}
+            >↑</button>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
+// ─── 메인 CustomerApp ───────────────────────────────────────────
 export default function CustomerApp() {
   const [eq,setEq] = useState(EQ_FALLBACK);
   const [step,setStep] = useState(1);
@@ -74,6 +212,7 @@ export default function CustomerApp() {
         </div>
         <button onClick={()=>{setStep(1);setItems([]);setForm({name:"",phone:"",venue:"",memo:""}); }} style={{width:"100%",border:"none",background:"#f59e0b",borderRadius:12,padding:"14px 0",fontSize:14,fontWeight:700,cursor:"pointer"}}>새 예약 신청</button>
       </div>
+      <AIChatBot eq={eq} />
     </div>
   );
 
@@ -180,6 +319,9 @@ export default function CustomerApp() {
           </div>
         )}
       </div>
+
+      {/* AI 챗봇 플로팅 */}
+      <AIChatBot eq={eq} />
     </div>
   );
 }
